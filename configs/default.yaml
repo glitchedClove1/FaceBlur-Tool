@@ -1,0 +1,12 @@
+# Single source of truth for hyperparameters and paths.
+# Extended in later phases (data, anchors, model, training) — never hardcode
+# values that live here inside the code.
+
+project:
+  name: face-detector
+  seed: 42
+
+env:
+  device: cuda        # "cuda" or "cpu"; train.py/inference.py fall back to cpu with a warning if cuda is unavailable
+  amp: true            # automatic mixed precision (only used when device == cuda)
+  cudnn_benchmark: true
