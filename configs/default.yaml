@@ -43,7 +43,10 @@ augmentation:
     prob: 0.1
   normalize:
     # ImageNet statistics — used only as a fixed, well-tested normalization constant, not as a source of
-    # pretrained weights (the model itself is still initialized randomly).
+    # pretrained weights (the model itself is still initialized randomly). Applied in the pipeline's native
+    # BGR channel order (cv2.imread's default, never converted to RGB) rather than the RGB order these are
+    # usually quoted in — inconsequential for a from-scratch model (R and B stats are close enough), just
+    # note it here so it isn't mistaken for a bug later.
     mean: [0.485, 0.456, 0.406]
     std: [0.229, 0.224, 0.225]
 
@@ -78,10 +81,38 @@ training:
   # for a generic architecture; this from-scratch model is much cheaper).
   # Measured peak VRAM at batch_size=96/384px: ~2.0GB of 4.3GB (47%) with
   # AMP - leaves comfortable headroom for the real loss (this measurement
-  # used a dummy loss) and other processes sharing the GPU. Remaining
-  # training hyperparameters (optimizer, LR schedule, epochs) are added in
-  # Phase 5.
+  # used a dummy loss) and other processes sharing the GPU.
   batch_size: 96
+  num_workers: 4
+  epochs: 60
+  optimizer: adamw       # "adamw" or "sgd"
+  lr: 0.0005
+  weight_decay: 0.0001
+  sgd_momentum: 0.9       # only used when optimizer == sgd
+  warmup_epochs: 2
+  lr_schedule: cosine      # "cosine" or "step"
+  step_lr_milestones: [40, 50]   # only used when lr_schedule == step
+  step_lr_gamma: 0.1
+  grad_clip_norm: 5.0
+  checkpoint_dir: checkpoints
+  log_dir: runs
+  log_every_n_steps: 20
+  overfit:
+    # --overfit-one-batch sanity gate: train on a single fixed batch until
+    # loss is near zero and predicted boxes visibly lock onto the GT faces.
+    # Must pass before any real training run - it's the one check that
+    # proves data -> anchors -> model -> loss -> decode -> draw are all
+    # wired correctly together.
+    batch_size: 8   # deliberately small (independent of training.batch_size) so the model can fully memorize it
+    steps: 400
+    lr: 0.001
+    conf_thresh: 0.3
+    nms_thresh: 0.4
+
+inference:
+  conf_thresh: 0.5
+  nms_thresh: 0.4
+  max_detections: 200
 
 loss:
   # Sigmoid focal loss (RetinaNet) rather than hard-negative mining: it
