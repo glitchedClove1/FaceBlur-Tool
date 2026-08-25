@@ -10,3 +10,39 @@ env:
   device: cuda        # "cuda" or "cpu"; train.py/inference.py fall back to cpu with a warning if cuda is unavailable
   amp: true            # automatic mixed precision (only used when device == cuda)
   cudnn_benchmark: true
+
+data:
+  root: data/widerface
+  image_size: 384        # square input resolution; 384 recommended for 4GB VRAM (see scripts/check_env.py)
+  min_face_size: 4.0      # px in the *original* image; boxes smaller than this are dropped (tiny faces become
+                           # sub-pixel after resize to image_size and just add label noise at this resolution)
+  drop_invalid: true      # drop boxes the WIDER FACE annotators flagged "invalid"
+  drop_empty_images: false  # keep images with zero remaining faces after filtering as background/hard-negative samples
+
+augmentation:
+  horizontal_flip:
+    enabled: true
+    prob: 0.5
+  random_crop:            # the "zoom" augmentation: crops a random region (bbox-safe) then resizes to image_size,
+    enabled: true          # which is what lets the network see small faces at a larger effective scale
+    prob: 0.5
+    erosion_rate: 0.2      # how much a crop is allowed to shrink retained boxes' visible area
+  color_jitter:
+    enabled: true
+    prob: 0.5
+    brightness: 0.4
+    contrast: 0.4
+    saturation: 0.3
+    hue: 0.1
+  blur:
+    enabled: true
+    prob: 0.1
+    blur_limit: 5
+  noise:
+    enabled: true
+    prob: 0.1
+  normalize:
+    # ImageNet statistics — used only as a fixed, well-tested normalization constant, not as a source of
+    # pretrained weights (the model itself is still initialized randomly).
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]

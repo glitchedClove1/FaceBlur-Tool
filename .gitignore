@@ -1,4 +1,5 @@
 .venv/
+HANDOFF.md
 __pycache__/
 *.pyc
 *.pyo
