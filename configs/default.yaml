@@ -46,3 +46,29 @@ augmentation:
     # pretrained weights (the model itself is still initialized randomly).
     mean: [0.485, 0.456, 0.406]
     std: [0.229, 0.224, 0.225]
+
+model:
+  backbone:
+    # Channel width at each stage. 5 stride-2 stages total (stem + 4), so
+    # stage_channels[1:] are exposed as C3/C4/C5 at strides 8/16/32 - kept
+    # narrow throughout since this runs on a 4GB GPU with no ImageNet init
+    # to lean on.
+    stem_channels: 16
+    stage_channels: [32, 64, 128, 256]   # stage1(stride4, internal only), C3(stride8), C4(stride16), C5(stride32)
+  neck:
+    fpn_channels: 128   # unified channel width for P3/P4/P5 after lateral 1x1 convs
+  head:
+    num_convs: 2         # shared conv tower depth before the cls/reg output convs
+    channels: 128
+
+anchors:
+  strides: [8, 16, 32]
+  # Two square-anchor scales per level (aspect ratio fixed at 1:1 - faces
+  # are near-square, so regression alone handles the rest). Sizes are in
+  # pixels at the network's input resolution (data.image_size) and follow
+  # RetinaFace's WIDER FACE anchor config, which was tuned specifically for
+  # this dataset's face-scale distribution.
+  min_sizes: [[16, 32], [64, 128], [256, 512]]
+  variances: [0.1, 0.2]   # encode/decode scaling for center-offset and log-size terms, SSD-style
+  pos_iou_threshold: 0.5   # anchor is positive if max IoU with any GT >= this...
+  neg_iou_threshold: 0.4   # ...negative if max IoU < this (anchors in between are ignored in the loss)
