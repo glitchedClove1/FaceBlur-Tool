@@ -35,6 +35,18 @@ class DetectionHead(nn.Module):
         self.cls_out = nn.Conv2d(tower_channels, num_anchors * 1, kernel_size=3, padding=1)
         self.reg_out = nn.Conv2d(tower_channels, num_anchors * 4, kernel_size=3, padding=1)
 
+        # The output convs get their own small-std init instead of the
+        # network-wide Kaiming init (see FaceDetector._init_weights, which
+        # deliberately skips these two modules): Kaiming's variance is
+        # tuned for hidden ReLU layers, and applied to a final prediction
+        # layer it produces logits with std in the tens-to-hundreds, which
+        # completely swamps the prior-bias trick below. A small std keeps
+        # each anchor's prediction close to the bias at init, which is the
+        # point of the trick.
+        nn.init.normal_(self.cls_out.weight, mean=0.0, std=0.01)
+        nn.init.normal_(self.reg_out.weight, mean=0.0, std=0.01)
+        nn.init.constant_(self.reg_out.bias, 0.0)
+
         # Bias the classification output toward predicting background at
         # init (standard RetinaNet focal-loss trick: prior_prob ~0.01) so
         # the huge negative:positive anchor imbalance doesn't produce a

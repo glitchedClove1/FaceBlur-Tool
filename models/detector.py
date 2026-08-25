@@ -56,11 +56,15 @@ class FaceDetector(nn.Module):
 
     def _init_weights(self) -> None:
         # Kaiming/He init (fan_out, relu) for every conv weight - the right
-        # default for a ReLU network trained from random init. Biases are
-        # left alone: BatchNorm already defaults to (weight=1, bias=0), and
-        # head.cls_out's bias was deliberately set to the focal-loss prior
-        # trick in DetectionHead.__init__ - overwriting it here would undo that.
+        # default for a ReLU network trained from random init - except the
+        # head's two output convs, which DetectionHead.__init__ already gave
+        # a deliberate small-std init (+ the focal-loss prior bias); Kaiming
+        # would blow their variance up and swamp that calibration. Other
+        # biases are left alone: BatchNorm already defaults to (weight=1, bias=0).
+        skip = {self.head.cls_out, self.head.reg_out}
         for module in self.modules():
+            if module in skip:
+                continue
             if isinstance(module, nn.Conv2d):
                 nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
 

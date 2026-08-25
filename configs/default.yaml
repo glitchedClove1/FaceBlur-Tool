@@ -82,3 +82,13 @@ training:
   # training hyperparameters (optimizer, LR schedule, epochs) are added in
   # Phase 5.
   batch_size: 96
+
+loss:
+  # Sigmoid focal loss (RetinaNet) rather than hard-negative mining: it
+  # down-weights easy negatives smoothly across *all* anchors instead of
+  # discarding most of them via a fixed neg:pos sampling ratio, which
+  # throws away information and is sensitive to how "hard" negatives get
+  # picked. alpha/gamma are the standard values from the focal loss paper.
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  bbox_loss_weight: 1.0   # multiplier on the localization term relative to classification
