@@ -72,3 +72,13 @@ anchors:
   variances: [0.1, 0.2]   # encode/decode scaling for center-offset and log-size terms, SSD-style
   pos_iou_threshold: 0.5   # anchor is positive if max IoU with any GT >= this...
   neg_iou_threshold: 0.4   # ...negative if max IoU < this (anchors in between are ignored in the loss)
+
+training:
+  # batch_size chosen empirically (scripts/check_env.py's recommendation was
+  # for a generic architecture; this from-scratch model is much cheaper).
+  # Measured peak VRAM at batch_size=96/384px: ~2.0GB of 4.3GB (47%) with
+  # AMP - leaves comfortable headroom for the real loss (this measurement
+  # used a dummy loss) and other processes sharing the GPU. Remaining
+  # training hyperparameters (optimizer, LR schedule, epochs) are added in
+  # Phase 5.
+  batch_size: 96
