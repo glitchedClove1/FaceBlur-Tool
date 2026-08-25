@@ -83,7 +83,17 @@ training:
   # AMP - leaves comfortable headroom for the real loss (this measurement
   # used a dummy loss) and other processes sharing the GPU.
   batch_size: 96
-  num_workers: 4
+  # 0, deliberately, not a generic default: this machine has only 7.4GB RAM,
+  # and Windows' spawn-based multiprocessing means each DataLoader worker
+  # re-imports the full torch/torchvision/cv2/albumentations stack from
+  # scratch (no copy-on-write like Linux fork). Empirically, num_workers=1,
+  # 2, and 4 all eventually crashed a worker process (RuntimeError:
+  # DataLoader worker exited unexpectedly) after enough steps; num_workers=0
+  # was the only setting that survived a full epoch, including the dataset's
+  # single most extreme image (1827 faces). Training is CPU-augmentation-
+  # bound as a result (measured ~4x slower than pure GPU compute time) - on
+  # a machine with more RAM, raising this is worth retrying.
+  num_workers: 0
   epochs: 60
   optimizer: adamw       # "adamw" or "sgd"
   lr: 0.0005
