@@ -12,6 +12,14 @@ Local run:
 from __future__ import annotations
 
 import os
+
+# Must be set before torch/numpy/cv2 are imported - their native thread
+# pools are sized at import/init time. On a free host (Render's 0.1 CPU
+# instance, for example) extra threads buy no real parallelism and just
+# add memory overhead, which matters when the whole budget is 512MB.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import tempfile
 from pathlib import Path
 
@@ -23,6 +31,9 @@ import yaml
 
 from engine.inference import detect, load_model
 from utils.boxes import blur_faces
+
+torch.set_num_threads(1)
+cv2.setNumThreads(1)
 
 REPO_ROOT = Path(__file__).resolve().parent
 CFG = yaml.safe_load((REPO_ROOT / "configs" / "default.yaml").read_text())

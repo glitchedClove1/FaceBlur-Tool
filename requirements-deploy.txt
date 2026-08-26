@@ -1,14 +1,20 @@
-# Trimmed dependency set for the Gradio deployment (Hugging Face Spaces free
-# CPU tier) - this is NOT the training environment's requirements.txt.
-# Excludes everything training-only: albumentations, tensorboard, pytest,
-# gdown, scipy (only used by engine/evaluate.py, not the deployed app).
+# Trimmed dependency set for the Gradio deployment (Render, Hugging Face
+# Spaces free CPU tier) - this is NOT the training environment's
+# requirements.txt. Excludes everything training-only: albumentations,
+# tensorboard, pytest, gdown, scipy (only used by engine/evaluate.py, not
+# the deployed app).
 #
-# CPU-only torch/torchvision (no --extra-index-url override needed - the
-# plain PyPI package names ship CPU wheels by default). A free Space has no
-# GPU, and installing CUDA wheels there just wastes build time and disk
-# for a backend that will never be used.
-torch==2.13.0
-torchvision==0.28.0
+# CPU-only torch/torchvision, pinned explicitly with the +cpu local version
+# and --extra-index-url. This is not optional: PyPI's default `torch`
+# package for Linux bundles the full CUDA runtime (cuBLAS/cuDNN/cuFFT/NCCL/
+# triton, several hundred MB) even with no GPU present - confirmed on a
+# real deploy, where plain `torch==2.13.0` resolved to the +cu126 build via
+# pip and blew through Render's 512MB free-tier limit before the app
+# process even finished starting. The +cpu tag forces the unambiguous CPU
+# wheel regardless of which resolver runs the install.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu
+torchvision==0.28.0+cpu
 
 numpy==2.5.2
 opencv-python-headless==5.0.0.93
