@@ -1,7 +1,7 @@
 """Box post-processing shared by training visualization, evaluation, and
 both inference apps: decode raw model outputs into (boxes, scores), clip to
-the image, and run NMS. Face blurring lives here too (added in the video/
-webcam app phase) since it's another "operate on a decoded box" utility.
+the image, and run NMS. Face blurring lives here too since it's another
+"operate on a decoded box" utility, used by both the video and webcam apps.
 """
 
 from __future__ import annotations
@@ -9,6 +9,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import cv2
+import numpy as np
 import torch
 from torch import Tensor
 from torchvision.ops import nms
@@ -75,6 +77,64 @@ def postprocess_batch(
     ]
 
 
+def _pad_and_clip_box(box: np.ndarray, pad_frac: float, width: int, height: int) -> tuple[int, int, int, int]:
+    """Expand a box by pad_frac of its own size (so hairline/chin/ears near
+    the tight face box get covered too), then clip to the frame - boxes near
+    the image border must not index outside the array."""
+    x1, y1, x2, y2 = box
+    w, h = x2 - x1, y2 - y1
+    pad_x, pad_y = w * pad_frac, h * pad_frac
+    x1 = int(max(0, x1 - pad_x))
+    y1 = int(max(0, y1 - pad_y))
+    x2 = int(min(width, x2 + pad_x))
+    y2 = int(min(height, y2 + pad_y))
+    return x1, y1, x2, y2
+
+
+def _odd(n: int) -> int:
+    return n if n % 2 == 1 else n + 1
+
+
+def blur_faces(image_bgr: np.ndarray, boxes: np.ndarray, mode: str, pad_frac: float = 0.15) -> np.ndarray:
+    """Blur every box region in-place-equivalent (returns a modified copy).
+
+    mode: "gaussian" (kernel size scales with box size, so small and large
+    faces are equally obscured - a fixed kernel would under-blur a large
+    face and over-blur a tiny one) or "pixelate" (downscale-then-upscale
+    mosaic). boxes: [N, 4] xyxy, any dtype.
+    """
+    if mode not in ("gaussian", "pixelate"):
+        raise ValueError(f"mode must be 'gaussian' or 'pixelate', got {mode!r}")
+
+    out = image_bgr.copy()
+    height, width = out.shape[:2]
+
+    for box in np.asarray(boxes):
+        x1, y1, x2, y2 = _pad_and_clip_box(box, pad_frac, width, height)
+        if x2 <= x1 or y2 <= y1:
+            continue  # degenerate after clipping (box entirely outside the frame)
+
+        region = out[y1:y2, x1:x2]
+        w, h = x2 - x1, y2 - y1
+
+        if mode == "gaussian":
+            # Kernel proportional to box size, capped so huge faces don't
+            # produce a huge (slow) kernel; floor of 3 keeps tiny faces blurred too.
+            k = _odd(int(np.clip(min(w, h) * 0.5, 3, 99)))
+            blurred = cv2.GaussianBlur(region, (k, k), 0)
+        else:
+            # Downscale to a coarse grid, then upscale with nearest-neighbor
+            # for hard mosaic blocks - block count scales with box size so
+            # small faces still get a handful of visible blocks.
+            blocks = max(4, min(w, h) // 12)
+            small = cv2.resize(region, (blocks, blocks), interpolation=cv2.INTER_LINEAR)
+            blurred = cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+
+        out[y1:y2, x1:x2] = blurred
+
+    return out
+
+
 if __name__ == "__main__":
     from data.anchors import generate_anchors
 
@@ -93,4 +153,11 @@ if __name__ == "__main__":
     assert boxes.shape[1] == 4
     assert (boxes[:, 0] <= boxes[:, 2]).all() and (boxes[:, 1] <= boxes[:, 3]).all()
     assert (boxes >= 0).all() and (boxes <= 384).all()
+
+    # Blur smoke test, including a box that hangs off the frame edge.
+    dummy_frame = np.random.randint(0, 255, (200, 200, 3), dtype=np.uint8)
+    edge_boxes = np.array([[10, 10, 60, 60], [-20, 150, 40, 220]], dtype=np.float32)
+    for mode in ("gaussian", "pixelate"):
+        blurred_frame = blur_faces(dummy_frame, edge_boxes, mode=mode)
+        assert blurred_frame.shape == dummy_frame.shape
     print("boxes.py smoke test passed")

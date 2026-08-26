@@ -94,7 +94,7 @@ training:
   # bound as a result (measured ~4x slower than pure GPU compute time) - on
   # a machine with more RAM, raising this is worth retrying.
   num_workers: 0
-  epochs: 60
+  epochs: 90
   optimizer: adamw       # "adamw" or "sgd"
   lr: 0.0005
   weight_decay: 0.0001

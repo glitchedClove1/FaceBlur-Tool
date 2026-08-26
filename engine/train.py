@@ -30,7 +30,7 @@ from data.transforms import build_eval_transform, build_train_transform
 from losses.loss import DetectionLoss
 from models.detector import FaceDetector
 from utils.boxes import postprocess_batch
-from utils.logging import AverageMeter, get_logger
+from utils.log_setup import AverageMeter, get_logger
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 logger = get_logger()
