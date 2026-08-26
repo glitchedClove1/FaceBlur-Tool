@@ -28,15 +28,24 @@ same ground-truth/algorithm used across published WIDER FACE results):
 | Checkpoint | Easy AP | Medium AP | Hard AP |
 |---|---|---|---|
 | 60 epochs  | 0.642 | 0.583 | 0.355 |
+| 90 epochs  | 0.656 | 0.592 | 0.365 |
 
 *(Hard is always lower than Easy for any model - it's judged against a
 stricter, larger set of required faces, including tiny/occluded ones.)*
 
 For context: published results using much larger backbones (ResNet-50+)
 with far longer training reach the 0.90s. These numbers are what a lean
-3.89M-parameter, from-scratch model reaches in a few GPU-hours on a 4GB
-laptop GPU - a real, working detector, not a toy that only detects on its
-own training batch.
+3.89M-parameter, from-scratch model reaches in ~5h45m of training on a
+4GB laptop GPU - a real, working detector, not a toy that only detects on
+its own training batch.
+
+The 60→90 epoch jump is a small but real lesson worth knowing if you
+extend training further yourself: the gain looks modest (+0.01-0.02 AP)
+because a cosine LR schedule decays to ~0 by design at whatever epoch
+count you configure - so simply resuming past that point trains at
+LR≈0 and does nothing. Getting real benefit from more epochs requires
+bumping `training.epochs` *before* resuming, so the schedule recalculates
+and gives the model real room to keep improving (see `--resume` below).
 
 **Training sanity gate** (`engine/train.py --overfit-one-batch`): loss
 19.56 → 0.007 over 400 steps on a fixed 8-image batch, predicted boxes
