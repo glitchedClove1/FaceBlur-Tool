@@ -11,6 +11,7 @@ Local run:
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -139,4 +140,9 @@ with gr.Blocks(title="Face Blur Tool") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch()
+    # Render (and most PaaS hosts) assign a port dynamically via $PORT and
+    # require binding to 0.0.0.0, not Gradio's local-only default of
+    # 127.0.0.1:7860. Falls back to the normal local default when PORT
+    # isn't set, so `python app.py` on your own machine is unaffected.
+    port = int(os.environ.get("PORT", 7860))
+    demo.launch(server_name="0.0.0.0", server_port=port)

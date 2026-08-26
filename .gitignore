@@ -11,10 +11,13 @@ data/widerface/*
 
 # Training artifacts
 runs/
-checkpoints/
-*.pth
+checkpoints/*
 *.pt
 outputs/
+# Exception: best.pth is committed deliberately (~47MB, well under GitHub's
+# limits) so deployment platforms (Render, HF Spaces) can pull weights
+# straight from the repo without a separate upload/download step.
+!checkpoints/best.pth
 logs/
 .tensorboard/
 
