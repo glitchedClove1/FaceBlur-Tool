@@ -26,3 +26,7 @@ pyyaml==6.0.3
 tensorboard==2.21.0
 matplotlib==3.11.1
 pytest==9.1.1
+scipy==1.18.0        # engine/evaluate.py: parses the official WIDER FACE eval ground-truth .mat files
+gdown==6.1.0          # scripts/download_widerface.py: Google Drive downloads for the image archives
+gradio==6.26.0        # app.py: local testing of the Hugging Face Spaces deployment UI
+                       # (see requirements-deploy.txt for the trimmed, CPU-only set actually shipped to the Space)

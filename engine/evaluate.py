@@ -51,8 +51,37 @@ SETTINGS = ["easy", "medium", "hard"]
 THRESH_NUM = 1000
 IOU_THRESH = 0.5
 
+# Official WIDER FACE eval-toolkit ground truth, mirrored (the small .mat
+# files, not the dataset itself) at a well-known community repo since the
+# original toolkit isn't a simple direct-download URL. Not committed to
+# this repo (binary, and belongs with the rest of data/widerface/ which is
+# gitignored) - fetched on demand instead, same reproducibility approach
+# as scripts/download_widerface.py uses for the dataset itself.
+_EVAL_TOOLS_BASE_URL = (
+    "https://raw.githubusercontent.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB/"
+    "master/widerface_evaluate/ground_truth"
+)
+_EVAL_TOOLS_FILES = ["wider_face_val.mat", "wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"]
+
+
+def ensure_eval_tools(gt_dir: Path) -> None:
+    gt_dir.mkdir(parents=True, exist_ok=True)
+    missing = [f for f in _EVAL_TOOLS_FILES if not (gt_dir / f).exists()]
+    if not missing:
+        return
+
+    import urllib.request
+
+    print(f"Fetching {len(missing)} official WIDER FACE eval ground-truth file(s)...")
+    for filename in missing:
+        url = f"{_EVAL_TOOLS_BASE_URL}/{filename}"
+        dest = gt_dir / filename
+        print(f"  {url}")
+        urllib.request.urlretrieve(url, dest)
+
 
 def load_ground_truth(gt_dir: Path):
+    ensure_eval_tools(gt_dir)
     gt_mat = loadmat(gt_dir / "wider_face_val.mat")
     face_bbx_list = gt_mat["face_bbx_list"]
     event_list = gt_mat["event_list"]
