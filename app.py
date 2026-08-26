@@ -20,6 +20,7 @@ import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -97,7 +98,24 @@ def process_video(video_path: str | None, blur_choice: str, conf_thresh: float, 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or None
 
     out_path = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
-    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+
+    # Encode directly to H.264/yuv420p via a piped ffmpeg process instead of
+    # cv2.VideoWriter's mp4v fourcc. mp4v isn't browser-playable, which left
+    # Gradio doing its own full second-pass re-encode after we returned (the
+    # "Video does not have browser-compatible container or codec" warning) -
+    # on a free-tier CPU that second full pass over the video, on top of our
+    # own per-frame inference pass, was slow enough to look hung. Encoding
+    # once, here, avoids it entirely: Gradio's own conversion step checks
+    # whether the file is already playable and skips itself if so.
+    ffmpeg_proc = subprocess.Popen(
+        [
+            "ffmpeg", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
+            "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart", "-loglevel", "error", out_path,
+        ],
+        stdin=subprocess.PIPE,
+    )
 
     frame_idx = 0
     while True:
@@ -112,12 +130,15 @@ def process_video(video_path: str | None, blur_choice: str, conf_thresh: float, 
         else:
             frame = blur_faces(frame, boxes, mode=blur_choice)
 
-        writer.write(frame)
+        ffmpeg_proc.stdin.write(np.ascontiguousarray(frame).tobytes())
         if total_frames:
             progress(frame_idx / total_frames, desc=f"Processing frame {frame_idx}/{total_frames}")
 
     cap.release()
-    writer.release()
+    ffmpeg_proc.stdin.close()
+    ffmpeg_proc.wait()
+    if ffmpeg_proc.returncode != 0:
+        raise gr.Error("Video encoding failed.")
     return out_path
 
 
