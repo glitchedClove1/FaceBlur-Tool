@@ -65,18 +65,16 @@ def process_frame(frame_rgb: np.ndarray | None, blur_choice: str, conf_thresh: f
     return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
 
-def process_video(video_path: str | None, blur_choice: str, conf_thresh: float, progress=gr.Progress()):
-    """Upload-a-video callback: processes every frame, returns a path to
-    the output file (Gradio's Video output reads a plain filesystem path).
-    Not real-time - the point of this mode is correctness on your own
-    footage, not live speed, so a slow CPU host is fine here."""
-    if video_path is None:
-        return None
-
+def _process_one_video(video_path: str, blur_choice: str, conf_thresh: float, progress_cb=None) -> str:
+    """Process a single video file end-to-end, returning the output path.
+    Shared by the single-video and batch tabs. progress_cb(frame_idx,
+    total_frames), if given, is called after every frame - callers map that
+    to their own progress scale (a fraction of one video for the single-video
+    tab, a fraction of the whole batch for the batch tab)."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         cap.release()
-        raise gr.Error("Could not open the uploaded video.")
+        raise gr.Error(f"Could not open video: {Path(video_path).name}")
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -89,8 +87,8 @@ def process_video(video_path: str | None, blur_choice: str, conf_thresh: float, 
         # Encodes H.264/yuv420p directly instead of cv2.VideoWriter's mp4v
         # fourcc, which isn't browser-playable and previously left Gradio
         # doing its own full second re-encode pass after we returned - on a
-        # free-tier CPU, that second pass over the whole video (on top of
-        # our own per-frame inference pass) was slow enough to look hung.
+        # free-tier CPU, that second pass over the video (on top of our own
+        # per-frame inference pass) was slow enough to look hung.
         with FfmpegVideoWriter(out_path, width, height, fps) as writer:
             frame_idx = 0
             while True:
@@ -106,8 +104,8 @@ def process_video(video_path: str | None, blur_choice: str, conf_thresh: float, 
                     frame = blur_faces(frame, boxes, mode=blur_choice)
 
                 writer.write(frame)
-                if total_frames:
-                    progress(frame_idx / total_frames, desc=f"Processing frame {frame_idx}/{total_frames}")
+                if progress_cb is not None:
+                    progress_cb(frame_idx, total_frames)
     except FfmpegNotFoundError as e:
         raise gr.Error(str(e)) from e
     except VideoEncodeError as e:
@@ -116,6 +114,52 @@ def process_video(video_path: str | None, blur_choice: str, conf_thresh: float, 
         cap.release()
 
     return out_path
+
+
+def process_video(video_path: str | None, blur_choice: str, conf_thresh: float, progress=gr.Progress()):
+    """Upload-a-video callback: processes every frame, returns a path to
+    the output file (Gradio's Video output reads a plain filesystem path).
+    Not real-time - the point of this mode is correctness on your own
+    footage, not live speed, so a slow CPU host is fine here."""
+    if video_path is None:
+        return None
+
+    def _cb(frame_idx: int, total_frames: int | None) -> None:
+        if total_frames:
+            progress(frame_idx / total_frames, desc=f"Processing frame {frame_idx}/{total_frames}")
+
+    return _process_one_video(video_path, blur_choice, conf_thresh, progress_cb=_cb)
+
+
+def process_video_batch(video_paths: list[str] | None, blur_choice: str, conf_thresh: float, progress=gr.Progress()):
+    """Batch-upload callback: processes each file in sequence. One bad or
+    corrupt file doesn't cost the rest of the batch - failures are skipped
+    and reported in the status message rather than aborting the whole run."""
+    if not video_paths:
+        return None, "No files uploaded."
+
+    n = len(video_paths)
+    outputs: list[str] = []
+    failures: list[str] = []
+
+    for i, video_path in enumerate(video_paths):
+        name = Path(video_path).name
+
+        def _cb(frame_idx: int, total_frames: int | None, i: int = i, name: str = name) -> None:
+            if total_frames:
+                frac = (i + frame_idx / total_frames) / n
+                progress(frac, desc=f"[{i + 1}/{n}] {name}: frame {frame_idx}/{total_frames}")
+
+        try:
+            outputs.append(_process_one_video(video_path, blur_choice, conf_thresh, progress_cb=_cb))
+        except gr.Error as e:
+            failures.append(f"{name}: {e}")
+
+    status = f"Processed {len(outputs)}/{n} file(s) successfully."
+    if failures:
+        status += "\n\nFailed:\n" + "\n".join(f"- {f}" for f in failures)
+
+    return outputs, status
 
 
 # Switching away from the Live webcam tab doesn't unmount it - gr.Tab just
@@ -156,6 +200,18 @@ with gr.Blocks(title="Face Blur Tool") as demo:
         video_btn = gr.Button("Process video", variant="primary")
         video_btn.click(process_video, [video_in, video_blur, video_conf], video_out)
 
+    with gr.Tab("Batch upload") as batch_tab:
+        gr.Markdown("Upload multiple videos - each is processed in sequence, faces blurred, with results downloadable below.")
+        with gr.Row():
+            batch_in = gr.File(label="Input videos", file_count="multiple", file_types=["video"])
+            batch_out = gr.File(label="Output videos", file_count="multiple")
+        with gr.Row():
+            batch_blur = gr.Radio(BLUR_CHOICES, value="gaussian", label="Blur mode")
+            batch_conf = gr.Slider(0.1, 0.9, value=CFG["inference"]["conf_thresh"], label="Confidence threshold")
+        batch_status = gr.Markdown()
+        batch_btn = gr.Button("Process batch", variant="primary")
+        batch_btn.click(process_video_batch, [batch_in, batch_blur, batch_conf], [batch_out, batch_status])
+
     with gr.Tab("Live webcam"):
         gr.Markdown("Live per-frame detection from your webcam. Free CPU hosting may lag - upload mode is more reliable for a smooth result.")
         with gr.Row():
@@ -166,6 +222,7 @@ with gr.Blocks(title="Face Blur Tool") as demo:
         cam_in.stream(process_frame, [cam_in, cam_blur, cam_conf], cam_out)
 
     video_tab.select(fn=lambda: None, outputs=[cam_in], js=_STOP_CAMERA_JS)
+    batch_tab.select(fn=lambda: None, outputs=[cam_in], js=_STOP_CAMERA_JS)
 
 
 if __name__ == "__main__":
