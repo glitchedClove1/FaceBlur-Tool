@@ -77,6 +77,18 @@ def postprocess_batch(
     ]
 
 
+def draw_detections(image_bgr: np.ndarray, boxes: np.ndarray, scores: np.ndarray) -> np.ndarray:
+    """Draw green boxes + confidence scores (the "off"/no-blur display mode),
+    shared by the Gradio demo and both CLI apps. Returns a copy - the input
+    frame is left untouched."""
+    out = image_bgr.copy()
+    for (x1, y1, x2, y2), score in zip(boxes, scores):
+        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+        cv2.rectangle(out, (x1, y1), (x2, y2), (0, 220, 0), 2)
+        cv2.putText(out, f"{score:.2f}", (x1, max(y1 - 6, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 0), 1)
+    return out
+
+
 def _pad_and_clip_box(box: np.ndarray, pad_frac: float, width: int, height: int) -> tuple[int, int, int, int]:
     """Expand a box by pad_frac of its own size (so hairline/chin/ears near
     the tight face box get covered too), then clip to the frame - boxes near

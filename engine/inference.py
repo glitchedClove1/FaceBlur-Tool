@@ -95,6 +95,22 @@ def detect(
     return boxes.cpu().numpy(), scores.cpu().numpy()
 
 
+def build_detect_kwargs(cfg: dict) -> dict:
+    """Extract detect()'s config-derived keyword arguments (mean/std,
+    variances, image_size, nms_thresh) - shared by every entry point so a
+    config schema change only needs updating here. conf_thresh is left out
+    deliberately since callers commonly override it (CLI --conf, the
+    Gradio slider) rather than always taking the config default."""
+    norm = cfg["augmentation"]["normalize"]
+    return {
+        "mean": norm["mean"],
+        "std": norm["std"],
+        "variances": tuple(cfg["anchors"]["variances"]),
+        "image_size": cfg["data"]["image_size"],
+        "nms_thresh": cfg["inference"]["nms_thresh"],
+    }
+
+
 def load_model(checkpoint_path: str, cfg: dict, device: torch.device):
     """Build a FaceDetector from cfg and load trained weights - shared by
     evaluate.py and both apps so there's one way to go from a .pth file to

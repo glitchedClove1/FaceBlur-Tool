@@ -16,22 +16,15 @@ import time
 from pathlib import Path
 
 import cv2
-import torch
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from engine.inference import detect, load_model
-from utils.boxes import blur_faces
+from engine.inference import build_detect_kwargs, detect, load_model
+from utils.boxes import blur_faces, draw_detections
+from utils.device import get_device
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def draw_detections(frame, boxes, scores) -> None:
-    for (x1, y1, x2, y2), score in zip(boxes, scores):
-        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 220, 0), 2)
-        cv2.putText(frame, f"{score:.2f}", (x1, max(y1 - 6, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 0), 1)
 
 
 def main() -> None:
@@ -44,17 +37,10 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
-    device = torch.device(cfg["env"]["device"] if torch.cuda.is_available() else "cpu")
-    if device.type == "cpu" and cfg["env"]["device"] == "cuda":
-        print("WARNING: CUDA not available, running on CPU (will be slower).")
-
+    device = get_device(cfg)
     model = load_model(args.weights, cfg, device)
-
-    norm = cfg["augmentation"]["normalize"]
-    variances = tuple(cfg["anchors"]["variances"])
-    image_size = cfg["data"]["image_size"]
+    detect_kwargs = build_detect_kwargs(cfg)
     conf_thresh = args.conf if args.conf is not None else cfg["inference"]["conf_thresh"]
-    nms_thresh = cfg["inference"]["nms_thresh"]
 
     cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():
@@ -71,15 +57,12 @@ def main() -> None:
                 print("Camera read failed, stopping.")
                 break
 
-            boxes, scores = detect(
-                frame, model, device, conf_thresh=conf_thresh, nms_thresh=nms_thresh,
-                image_size=image_size, mean=norm["mean"], std=norm["std"], variances=variances,
-            )
+            boxes, scores = detect(frame, model, device, conf_thresh=conf_thresh, **detect_kwargs)
 
             if args.blur != "off":
                 frame = blur_faces(frame, boxes, mode=args.blur)
             else:
-                draw_detections(frame, boxes, scores)
+                frame = draw_detections(frame, boxes, scores)
 
             now = time.time()
             instant_fps = 1.0 / max(now - prev_t, 1e-6)

@@ -30,6 +30,7 @@ from data.transforms import build_eval_transform, build_train_transform
 from losses.loss import DetectionLoss
 from models.detector import FaceDetector
 from utils.boxes import postprocess_batch
+from utils.device import get_device
 from utils.log_setup import AverageMeter, get_logger
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -43,12 +44,13 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
-def get_device(cfg: dict) -> torch.device:
-    requested = cfg["env"]["device"]
-    if requested == "cuda" and not torch.cuda.is_available():
-        logger.warning("env.device is 'cuda' but CUDA is not available - falling back to CPU. Training will be slow.")
-        return torch.device("cpu")
-    return torch.device(requested)
+def amp_enabled_for(cfg: dict, device: torch.device) -> bool:
+    """Single source of truth for whether AMP is actually active - config
+    says it's requested AND we're actually on CUDA (autocast/GradScaler on
+    CPU do nothing useful). Used both for autocast in run_epoch (train and
+    eval) and for building the GradScaler in train(); the two calls aren't
+    reducible to one another since eval runs with no scaler at all."""
+    return cfg["env"]["amp"] and device.type == "cuda"
 
 
 def collate_fn(batch: list[dict]) -> dict:
@@ -155,7 +157,7 @@ def run_epoch(
     model.train(is_train)
 
     meters = {"loss": AverageMeter(), "cls_loss": AverageMeter(), "bbox_loss": AverageMeter()}
-    amp_enabled = cfg["env"]["amp"] and device.type == "cuda"
+    amp_enabled = amp_enabled_for(cfg, device)
     start = time.time()
 
     for step, batch in enumerate(loader):
@@ -216,7 +218,7 @@ def train(cfg: dict, resume: str | None = None) -> None:
 
     optimizer = build_optimizer(model, cfg)
     scheduler = build_scheduler(optimizer, cfg, steps_per_epoch=len(train_loader))
-    scaler = torch.amp.GradScaler("cuda", enabled=cfg["env"]["amp"] and device.type == "cuda")
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled_for(cfg, device))
 
     checkpoint_dir = REPO_ROOT / cfg["training"]["checkpoint_dir"]
     last_path = checkpoint_dir / "last.pth"
