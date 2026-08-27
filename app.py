@@ -74,12 +74,21 @@ def process_frame(frame_rgb: np.ndarray | None, blur_choice: str, conf_thresh: f
     return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
 
-def _process_one_video(video_path: str, blur_choice: str, conf_thresh: float, progress_cb=None) -> str:
+def _process_one_video(
+    video_path: str, blur_choice: str, conf_thresh: float,
+    start_sec: float = 0.0, end_sec: float | None = None,
+    progress_cb=None,
+) -> str:
     """Process a single video file end-to-end, returning the output path.
     Shared by the single-video and batch tabs. progress_cb(frame_idx,
     total_frames), if given, is called after every frame - callers map that
     to their own progress scale (a fraction of one video for the single-video
-    tab, a fraction of the whole batch for the batch tab)."""
+    tab, a fraction of the whole batch for the batch tab).
+
+    start_sec/end_sec trim the range processed (end_sec=None means "to the
+    end"). Seeking is frame-index-based (CAP_PROP_POS_FRAMES), not
+    timestamp-based (CAP_PROP_POS_MSEC) - more reliably accurate across
+    container/codec combinations for landing on the exact requested frame."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         cap.release()
@@ -88,7 +97,19 @@ def _process_one_video(video_path: str, blur_choice: str, conf_thresh: float, pr
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or None
+    video_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or None
+
+    start_frame = max(0, round((start_sec or 0.0) * fps))
+    end_frame = round(end_sec * fps) if end_sec is not None and end_sec > 0 else video_frame_count
+    if video_frame_count is not None and end_frame is not None:
+        end_frame = min(end_frame, video_frame_count)
+    if end_frame is not None and start_frame >= end_frame:
+        cap.release()
+        raise gr.Error(f"{Path(video_path).name}: start time must be before end time and within the video's length.")
+
+    if start_frame > 0:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    total_frames = (end_frame - start_frame) if end_frame is not None else None
 
     # Written inside Gradio's own cache dir (not the plain OS temp root) so
     # delete_cache (below) tracks and cleans up this exact file. A path
@@ -106,6 +127,8 @@ def _process_one_video(video_path: str, blur_choice: str, conf_thresh: float, pr
         with FfmpegVideoWriter(out_path, width, height, fps) as writer:
             frame_idx = 0
             while True:
+                if end_frame is not None and start_frame + frame_idx >= end_frame:
+                    break
                 ok, frame = cap.read()
                 if not ok:
                     break
@@ -130,11 +153,15 @@ def _process_one_video(video_path: str, blur_choice: str, conf_thresh: float, pr
     return out_path
 
 
-def process_video(video_path: str | None, blur_choice: str, conf_thresh: float, progress=gr.Progress()):
-    """Upload-a-video callback: processes every frame, returns a path to
-    the output file (Gradio's Video output reads a plain filesystem path).
-    Not real-time - the point of this mode is correctness on your own
-    footage, not live speed, so a slow CPU host is fine here."""
+def process_video(
+    video_path: str | None, blur_choice: str, conf_thresh: float,
+    start_sec: float, end_sec: float | None, progress=gr.Progress(),
+):
+    """Upload-a-video callback: processes every frame in [start_sec, end_sec)
+    (end_sec=None/0 means to the end), returns a path to the output file
+    (Gradio's Video output reads a plain filesystem path). Not real-time -
+    the point of this mode is correctness on your own footage, not live
+    speed, so a slow CPU host is fine here."""
     if video_path is None:
         return None
 
@@ -142,13 +169,18 @@ def process_video(video_path: str | None, blur_choice: str, conf_thresh: float, 
         if total_frames:
             progress(frame_idx / total_frames, desc=f"Processing frame {frame_idx}/{total_frames}")
 
-    return _process_one_video(video_path, blur_choice, conf_thresh, progress_cb=_cb)
+    return _process_one_video(video_path, blur_choice, conf_thresh, start_sec or 0.0, end_sec, progress_cb=_cb)
 
 
-def process_video_batch(video_paths: list[str] | None, blur_choice: str, conf_thresh: float, progress=gr.Progress()):
-    """Batch-upload callback: processes each file in sequence. One bad or
-    corrupt file doesn't cost the rest of the batch - failures are skipped
-    and reported in the status message rather than aborting the whole run."""
+def process_video_batch(
+    video_paths: list[str] | None, blur_choice: str, conf_thresh: float,
+    start_sec: float, end_sec: float | None, progress=gr.Progress(),
+):
+    """Batch-upload callback: processes each file in sequence, trimmed to
+    the same [start_sec, end_sec) range. One bad/corrupt file - or one too
+    short for the requested range - doesn't cost the rest of the batch:
+    failures are skipped and reported in the status message rather than
+    aborting the whole run."""
     if not video_paths:
         return None, "No files uploaded."
 
@@ -165,7 +197,9 @@ def process_video_batch(video_paths: list[str] | None, blur_choice: str, conf_th
                 progress(frac, desc=f"[{i + 1}/{n}] {name}: frame {frame_idx}/{total_frames}")
 
         try:
-            outputs.append(_process_one_video(video_path, blur_choice, conf_thresh, progress_cb=_cb))
+            outputs.append(_process_one_video(
+                video_path, blur_choice, conf_thresh, start_sec or 0.0, end_sec, progress_cb=_cb
+            ))
         except gr.Error as e:
             failures.append(f"{name}: {e}")
 
@@ -220,8 +254,11 @@ with gr.Blocks(title="Face Blur Tool", delete_cache=(600, 600)) as demo:
         with gr.Row():
             video_blur = gr.Radio(BLUR_CHOICES, value="gaussian", label="Blur mode")
             video_conf = gr.Slider(0.1, 0.9, value=CFG["inference"]["conf_thresh"], label="Confidence threshold")
+        with gr.Row():
+            video_start = gr.Number(value=0, minimum=0, label="Start (seconds)")
+            video_end = gr.Number(value=None, minimum=0, label="End (seconds, blank = to the end)")
         video_btn = gr.Button("Process video", variant="primary")
-        video_btn.click(process_video, [video_in, video_blur, video_conf], video_out)
+        video_btn.click(process_video, [video_in, video_blur, video_conf, video_start, video_end], video_out)
 
     with gr.Tab("Batch upload") as batch_tab:
         gr.Markdown("Upload multiple videos - each is processed in sequence, faces blurred, with results downloadable below.")
@@ -231,9 +268,15 @@ with gr.Blocks(title="Face Blur Tool", delete_cache=(600, 600)) as demo:
         with gr.Row():
             batch_blur = gr.Radio(BLUR_CHOICES, value="gaussian", label="Blur mode")
             batch_conf = gr.Slider(0.1, 0.9, value=CFG["inference"]["conf_thresh"], label="Confidence threshold")
+        with gr.Row():
+            batch_start = gr.Number(value=0, minimum=0, label="Start (seconds)")
+            batch_end = gr.Number(value=None, minimum=0, label="End (seconds, blank = to the end)")
+        gr.Markdown("Start/end apply to every file in the batch. A file shorter than the requested range is skipped and reported below, not aborted.")
         batch_status = gr.Markdown()
         batch_btn = gr.Button("Process batch", variant="primary")
-        batch_btn.click(process_video_batch, [batch_in, batch_blur, batch_conf], [batch_out, batch_status])
+        batch_btn.click(
+            process_video_batch, [batch_in, batch_blur, batch_conf, batch_start, batch_end], [batch_out, batch_status]
+        )
 
     with gr.Tab("Live webcam"):
         gr.Markdown("Live per-frame detection from your webcam. Free CPU hosting may lag - upload mode is more reliable for a smooth result.")

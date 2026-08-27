@@ -135,7 +135,7 @@ Both commands share `engine/inference.py`'s `detect()` function (letterbox prepr
 
 ## Deploying the web application
 
-`app.py` is a Gradio interface wrapping the same detection and blurring code as the CLI applications, with tabs for single-video upload, batch upload (multiple files processed in sequence, one failure doesn't abort the rest), and live webcam use.
+`app.py` is a Gradio interface wrapping the same detection and blurring code as the CLI applications, with tabs for single-video upload, batch upload (multiple files processed in sequence, one failure doesn't abort the rest), and live webcam use. The video tabs support trimming to a start/end range, so only the requested portion of each file is processed - useful on its own, and it also cuts processing time on a CPU-limited free-tier deployment.
 
 ### Render
 
