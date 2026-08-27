@@ -160,6 +160,10 @@ Note: Hugging Face has restricted CPU Basic Space creation for some new free acc
 
 Live webcam mode may be less responsive on free CPU hosting under load; the video upload path is the more reliable option for a free deployment.
 
+### Data handling
+
+Uploaded and processed files are kept only as temporary files on the server; nothing is written to a database, logged, or shared with any third party. `app.py` runs with Gradio's `delete_cache=(600, 600)`, which deletes any temp file (upload or generated output) older than 10 minutes — see the comment above the `gr.Blocks(...)` call for how this is wired so it actually covers files this app generates, not just what Gradio's own upload path creates by default.
+
 ## Bring your own footage
 
 **Testing only** (no labels required): point `apps/detect_video.py` or `apps/detect_webcam.py` at any video file or webcam.

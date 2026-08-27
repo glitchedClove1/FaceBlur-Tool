@@ -46,6 +46,15 @@ DETECT_KWARGS = build_detect_kwargs(CFG)
 BLUR_CHOICES = ["gaussian", "pixelate", "off (show boxes only)"]
 
 
+def _gradio_temp_dir() -> str:
+    """Same directory Gradio itself uses for uploads/cache (GRADIO_TEMP_DIR,
+    defaulting to <system temp>/gradio) - not re-derived from a private
+    import, just the documented env var Gradio's own resolution follows."""
+    d = Path(os.environ.get("GRADIO_TEMP_DIR") or (Path(tempfile.gettempdir()) / "gradio"))
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d)
+
+
 def _run_detection(frame_bgr: np.ndarray, conf_thresh: float):
     return detect(frame_bgr, MODEL, DEVICE, conf_thresh=conf_thresh, **DETECT_KWARGS)
 
@@ -81,7 +90,12 @@ def _process_one_video(video_path: str, blur_choice: str, conf_thresh: float, pr
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or None
 
-    out_path = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+    # Written inside Gradio's own cache dir (not the plain OS temp root) so
+    # delete_cache (below) tracks and cleans up this exact file. A path
+    # outside that directory gets copied into it by Gradio when returned -
+    # the copy would get cleaned up, but this original would silently sit
+    # on disk untracked and undeleted.
+    out_path = tempfile.NamedTemporaryFile(suffix=".mp4", dir=_gradio_temp_dir(), delete=False).name
 
     try:
         # Encodes H.264/yuv420p directly instead of cv2.VideoWriter's mp4v
@@ -181,12 +195,21 @@ _STOP_CAMERA_JS = """
 """
 
 
-with gr.Blocks(title="Face Blur Tool") as demo:
+# delete_cache=(frequency, age): every 10 minutes, delete any temp file
+# (upload or generated output) older than 10 minutes. Makes the privacy
+# note below actually true instead of just a claim - without this, both
+# uploaded and processed files would otherwise sit on disk until the whole
+# server process restarts.
+with gr.Blocks(title="Face Blur Tool", delete_cache=(600, 600)) as demo:
     gr.Markdown(
         "# Face Blur Tool\n"
         "A from-scratch, custom-trained face detector (no pretrained weights, "
         "no third-party face-detection library) used to automatically blur "
-        "faces in your own video, or live from your webcam."
+        "faces in your own video, or live from your webcam.\n\n"
+        "**Data handling:** uploaded and processed files are kept only as "
+        "temporary files on the server and are automatically deleted within "
+        "10 minutes. Nothing is written to a database, logged, or shared "
+        "with any third party."
     )
 
     with gr.Tab("Upload a video") as video_tab:
